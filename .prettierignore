@@ -1,0 +1,9 @@
+.eslintrc.cjs
+.gitlab-ci.yml
+**/.git
+**/.svn
+**/.hg
+**/node_modules
+**/dist
+tsconfig.json
+vite.config.cjs
