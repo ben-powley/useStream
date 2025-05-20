@@ -1,4 +1,4 @@
-import type { UseStreamProps, UseStreamReturn, WorkerMessage } from './Types'
+import type { UseStreamProps, UseStreamReturn, WorkerMessage, WorkerError } from './Types' // Import WorkerError
 import { bytesToSize } from "./Helpers/FileHelper"
 import { useCallback, useMemo, useState } from "react";
 import ChunkWorker from './Workers/ChunkWorker?worker&inline'
@@ -8,11 +8,14 @@ import ChunkWorker from './Workers/ChunkWorker?worker&inline'
  * @param {string} [props.url] Url to fetch.
  * @param {ChunkProcessed} [props.chunkProcessed] Function run each time a chunk is proccessed.
  * @param {UseStreamMode} [props.mode] Mode for the chunk processing (json, csv).
+ * @param {function} [props.onError] Callback function for handling errors.
  * @returns {UseStreamReturn}
  */
-export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', }: UseStreamProps<T>): UseStreamReturn => {
+export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', onError }: UseStreamProps<T>): UseStreamReturn => {
   const [streaming, setStreaming] = useState(false)
   const [sizeDownloaded, setSizeDownloaded] = useState('')
+  const [error, setError] = useState<Error | null>(null); // Added error state
+
   if (!window.Worker) throw new Error("Browser does not support web workers.")
 
   let abortController = new AbortController()
@@ -22,6 +25,7 @@ export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', }: 
   const start = useCallback(async () => {
     setStreaming(true)
     setSizeDownloaded('')
+    setError(null); // Reset error state on new start
 
     const signal = abortController.signal
     const response = await fetch(url, { method: 'GET', signal })
@@ -42,46 +46,107 @@ export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', }: 
 
     switch (mode) {
       case 'csv':
-        // TODO
-        break
-
-      case 'json':
         {
+          // Ensure tempItems is correctly typed for CSV (array of string arrays)
+          // The generic T should be string[] for CSV mode.
+          const tempCSVItems: string[][] = tempItems as unknown as string[][];
+          allData = ''; // Reset allData for each start call
+          index = 0; // Reset index for each start call
+
           worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
             if (event.data) {
               if (event.data.type === 'chunk') {
                 try {
-                  allData += event.data.data
-
-                  const item = JSON.parse(event.data.data) as T
-
-                  setSizeDownloaded(bytesToSize(allData.length))
-
-                  tempItems.push(item)
-
-                  if (chunkProcessed) chunkProcessed({ chunkIndex: index, chunk: item })
-
-                  index++
-                } catch (exception) {
-                  return Promise.reject(`There was an error processing the chunk - ${exception}`)
+                  const parsedRow = event.data.data as string[];
+                  allData += parsedRow.join(',') + '\n'; 
+                  setSizeDownloaded(bytesToSize(allData.length));
+                  tempCSVItems.push(parsedRow);
+                  if (chunkProcessed) {
+                    (chunkProcessed as (args: { chunkIndex: number; chunk: string[] }) => void)({
+                      chunkIndex: index,
+                      chunk: parsedRow
+                    });
+                  }
+                  index++;
+                } catch (err) {
+                  console.error(`Error processing CSV chunk in useStream: ${err}`);
+                  const streamError = err instanceof Error ? err : new Error(String(err));
+                  setError(streamError);
+                  if (onError) onError(streamError);
+                  setStreaming(false);
+                  // Optionally terminate worker: worker.terminate();
                 }
               } else if (event.data.type === 'finished') {
-                setStreaming(false)
-                finished(tempItems)
+                setStreaming(false);
+                (finished as (result: string[][]) => void)(tempCSVItems);
+              } else if (event.data.type === 'error') {
+                const errorInfo = event.data.data as WorkerError;
+                const err = new Error(errorInfo.message);
+                err.name = errorInfo.name;
+                // err.stack = errorInfo.stack; // Optionally assign stack
+                
+                setError(err);
+                if (onError) onError(err);
+                setStreaming(false);
               }
             }
-          }
+          };
+          break;
+        }
+      case 'json':
+        {
+          // Ensure tempItems is correctly typed for JSON (array of objects of type T)
+          const tempJSONItems: T[] = tempItems as T[];
+          allData = ''; // Reset allData for each start call
+          index = 0; // Reset index for each start call
+
+          worker.onmessage = (event: MessageEvent<WorkerMessage>) => {
+            if (event.data) {
+              if (event.data.type === 'chunk') {
+                try {
+                  allData += event.data.data as string;
+                  const item = JSON.parse(event.data.data as string) as T;
+                  setSizeDownloaded(bytesToSize(allData.length));
+                  tempJSONItems.push(item);
+                  if (chunkProcessed) (chunkProcessed as (args: { chunkIndex: number; chunk: T }) => void)({ chunkIndex: index, chunk: item });
+                  index++;
+                } catch (err) {
+                  console.error(`Error processing JSON chunk in useStream: ${err}`);
+                  // This catch is for errors during JSON.parse or subsequent processing in useStream itself.
+                  const streamError = err instanceof Error ? err : new Error(String(err));
+                  setError(streamError);
+                  if (onError) onError(streamError);
+                  setStreaming(false);
+                   // Optionally terminate worker: worker.terminate();
+                }
+              } else if (event.data.type === 'finished') {
+                setStreaming(false);
+                (finished as (result: T[]) => void)(tempJSONItems);
+              } else if (event.data.type === 'error') {
+                const errorInfo = event.data.data as WorkerError;
+                const err = new Error(errorInfo.message);
+                err.name = errorInfo.name;
+                // err.stack = errorInfo.stack; // Optionally assign stack
+
+                setError(err);
+                if (onError) onError(err);
+                setStreaming(false);
+              }
+            }
+          };
+          break;
         }
     }
-  }, [url, mode])
+  }, [url, mode, worker, chunkProcessed, finished, onError]) // Added onError to dependency array
 
   const cancel = useCallback(async () => {
     setStreaming(false)
-
+    // setError(null); // Optionally reset error on cancel
     abortController.abort()
-    worker.terminate()
-    abortController = new AbortController()
-  }, [url, mode])
+    // Re-create worker on next start, so terminate it here
+    worker.terminate() 
+    // abortController = new AbortController(); // This will be handled by useMemo for worker re-creation if needed, or start re-initializes it.
+  }, [worker]) // Removed url, mode from cancel dependencies, added worker
 
-  return { start, cancel, streaming, sizeDownloaded }
+  return { start, cancel, streaming, sizeDownloaded, error } // Added error to return object
 }
