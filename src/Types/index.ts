@@ -11,15 +11,6 @@ type ChunkProcessed<T> = {
   chunk: T
 }
 
-/**
- * Props type for the useStream hook.
- */
-type UseStreamProps<T> = {
-  url: string
-  mode?: UseStreamMode
-  chunkProcessed?: ({ chunkIndex, chunk }: ChunkProcessed<T>) => void,
-  finished: (data: T[]) => void
-}
 
 /**
  * Return type for the useStream hook.

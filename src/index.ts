@@ -58,7 +58,7 @@ export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', onE
               if (event.data.type === 'chunk') {
                 try {
                   const parsedRow = event.data.data as string[];
-                  allData += parsedRow.join(',') + '\n'; 
+                  allData += parsedRow.join(',') + '\n';
                   setSizeDownloaded(bytesToSize(allData.length));
                   tempCSVItems.push(parsedRow);
                   if (chunkProcessed) {
@@ -84,7 +84,7 @@ export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', onE
                 const err = new Error(errorInfo.message);
                 err.name = errorInfo.name;
                 // err.stack = errorInfo.stack; // Optionally assign stack
-                
+
                 setError(err);
                 if (onError) onError(err);
                 setStreaming(false);
@@ -117,7 +117,7 @@ export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', onE
                   setError(streamError);
                   if (onError) onError(streamError);
                   setStreaming(false);
-                   // Optionally terminate worker: worker.terminate();
+                  // Optionally terminate worker: worker.terminate();
                 }
               } else if (event.data.type === 'finished') {
                 setStreaming(false);
@@ -144,7 +144,7 @@ export const useStream = <T>({ url, chunkProcessed, finished, mode = 'json', onE
     // setError(null); // Optionally reset error on cancel
     abortController.abort()
     // Re-create worker on next start, so terminate it here
-    worker.terminate() 
+    worker.terminate()
     // abortController = new AbortController(); // This will be handled by useMemo for worker re-creation if needed, or start re-initializes it.
   }, [worker]) // Removed url, mode from cancel dependencies, added worker
 

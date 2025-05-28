@@ -1,6 +1,6 @@
 import { useStream } from '../index'
 import { useState } from 'react'
-import type { Todo} from './Types'
+import type { Todo } from './Types'
 
 const App = () => {
   const [s1Data, setS1Data] = useState<Todo[]>([])
@@ -22,7 +22,7 @@ const App = () => {
   }
 
   const cancelStream1 = async () => {
-    await stream2.cancel()
+    await stream1.cancel()
   }
 
   return (
